@@ -1,0 +1,7 @@
+google-cloud-aiplatform[adk,agent_engines]>=1.133.0
+google-adk>=1.22.1
+python-dotenv
+fastmcp>=0.4.1
+litellm
+fastapi
+uvicorn[standard]
