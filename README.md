@@ -4,6 +4,8 @@ This repository contains an Enterprise-grade AI Agent built using the [Google Cl
 
 ## Architecture & Goals
 
+![Legal Agent Architecture](images/legal_agent_architecture.png)
+
 This agent demonstrates **Native RAG Integration** for high-stakes legal analysis. 
 1.  **Managed Indexing**: Creates and maintains a managed RAG Corpus in Vertex AI containing highly complex SEC legal contracts.
 2.  **Native Tool Binding**: Embeds the `VertexAiRagRetrieval` tool directly into the agent's reasoning loop.
