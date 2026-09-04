@@ -23,6 +23,12 @@ PROJECT_ID: Optional[str] = os.getenv("PROJECT_ID") or os.getenv("GOOGLE_CLOUD_P
 LOCATION: str = os.getenv("LOCATION", "us-central1")
 LEGAL_CORPUS_DISPLAY_NAME: str = os.getenv("LEGAL_CORPUS", "sec-legal-contracts-v2")
 RAG_CORPUS_NAME: Optional[str] = os.getenv("RAG_CORPUS_NAME")
+AGENT_MODEL: str = (
+    os.getenv("AGENT_MODEL")
+    or os.getenv("MODEL_NAME")
+    or os.getenv("MODEL")
+    or "gemini-3.7-flash"
+)
 
 # Initialize Vertex AI in us-central1 for RAG 2.0 Serverless support
 if PROJECT_ID:
@@ -74,7 +80,7 @@ Answer:
 # Define root_agent for ADK and agents-cli
 root_agent = Agent(
     name="legal_analyst_agent",
-    model="gemini-2.5-pro",
+    model=AGENT_MODEL,
     tools=tools,
     instruction=LEGAL_ANALYST_INSTRUCTION,
 )

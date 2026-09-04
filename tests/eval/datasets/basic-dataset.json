@@ -1,30 +1,78 @@
 {
   "eval_cases": [
     {
-      "eval_case_id": "greeting",
+      "eval_case_id": "clause_override_lockheed_martin",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "Hello, what can you help me with?"}]
-      }
-    },
-    {
-      "eval_case_id": "weather_query",
-      "prompt": {
-        "role": "user",
-        "parts": [{"text": "What's the weather like in San Francisco?"}]
-      }
-    },
-    {
-      "eval_case_id": "capital_lookup",
-      "prompt": {
-        "role": "user",
-        "parts": [{"text": "What is the capital of France?"}]
+        "parts": [
+          {
+            "text": "Identify the specific amendment within the Lockheed Martin Corporation documents that modified the 'Termination' clause. How does the termination date differ between the original agreement and the currently amended version?"
+          }
+        ]
       },
       "reference": {
-        "response": {
-          "role": "model",
-          "parts": [{"text": "The capital of France is Paris."}]
-        }
+        "expected_sources": ["lmt_family_3"],
+        "criteria": "Accurately locates the 'Termination' clause. Identifies the exact Amendment number or document name that overrides these clauses. Clearly states the delta (e.g. 'The termination date changed from X to Y'). Explicitly notes if the original date is missing from the retrieved context."
+      }
+    },
+    {
+      "eval_case_id": "net_new_obligations_disney",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Based on the original agreement and the subsequent amendments for The Walt Disney Company, what are the net-new compliance or reporting obligations imposed on the parties that were entirely absent from the original text?"
+          }
+        ]
+      },
+      "reference": {
+        "expected_sources": ["dis_family_14"],
+        "criteria": "Performs a semantic diff comparing the master agreement's compliance/reporting covenants with those in the amendments. Must explicitly name the newly added requirements (e.g. new ESG reporting, new data delivery schedules) that were strictly absent from the master document."
+      }
+    },
+    {
+      "eval_case_id": "entity_addition_unitedhealth",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Across the entire contract family for UnitedHealth Group Incorporated, list all counterparties or subsidiaries (such as Optum Services, Inc., or Health Plan of Nevada, Inc.) that were explicitly added over time."
+          }
+        ]
+      },
+      "reference": {
+        "expected_sources": ["unh_family_2"],
+        "criteria": "Explicitly lists the specific domestic corporate subsidiaries found in the documents that were added as guarantors/parties in an amendment (e.g. Optum Select Management, Inc., United HealthCare Services, Inc., Health Plan of Nevada, Inc.)."
+      }
+    },
+    {
+      "eval_case_id": "tracing_definitions_comcast",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "How was the definition of 'Marketable Securities' modified by the amendments in the Comcast Corporation family? Quote the original definition and the final amended definition."
+          }
+        ]
+      },
+      "reference": {
+        "expected_sources": ["cmcsa_family_1"],
+        "criteria": "Locates the Definitions section of the Master Agreement or Amendment. Quotes the original definition for 'Marketable Securities'. Locates the exact amendment where the definition was replaced or expanded and quotes the final definition. Explicitly notes if either definition is missing from context."
+      }
+    },
+    {
+      "eval_case_id": "cross_family_comparison_boa_gs",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Compare the 'Governing Law' and 'Dispute Resolution' clauses across the Bank of America and Goldman Sachs documents. Did any of these financial institutions change their preferred jurisdiction or arbitration rules via an amendment, and how do their baseline governing laws differ?"
+          }
+        ]
+      },
+      "reference": {
+        "expected_sources": ["bac_family_7", "gs_family_0"],
+        "criteria": "Executes a multi-hop query across different contract directories. Correctly states the Governing Law for Bank of America, compares it to Goldman Sachs, and identifies if any amendment shifted the jurisdiction or arbitration rules."
       }
     }
   ]

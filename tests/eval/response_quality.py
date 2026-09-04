@@ -1,10 +1,13 @@
 """Local LLM-as-judge for `custom_response_quality` (see eval_config.yaml)."""
 
+import os
 import threading
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
+
+EVAL_JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "gemini-3.7-flash")
 
 _local = threading.local()
 
@@ -51,7 +54,7 @@ def evaluate(instance):
     prompt += f"Full Agent Trace: {instance.get('agent_data', '')}\n"
 
     response = _client().models.generate_content(
-        model="gemini-3.7-flash",
+        model=EVAL_JUDGE_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
             temperature=0,  # deterministic grading

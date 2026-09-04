@@ -26,6 +26,12 @@ load_dotenv(find_dotenv())
 PROJECT_ID = os.getenv("PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.getenv("LOCATION", "us-central1")
 RAG_CORPUS_NAME = os.getenv("RAG_CORPUS_NAME")
+AGENT_MODEL = (
+    os.getenv("AGENT_MODEL")
+    or os.getenv("MODEL_NAME")
+    or os.getenv("MODEL")
+    or "gemini-3.7-flash"
+)
 
 if not PROJECT_ID:
     print("Error: PROJECT_ID or GOOGLE_CLOUD_PROJECT environment variable is required.", file=sys.stderr)
@@ -120,7 +126,7 @@ def build_agent_model() -> GenerativeModel:
     )
 
     return GenerativeModel(
-        model_name="gemini-2.5-pro",
+        model_name=AGENT_MODEL,
         tools=rag_tools,
         system_instruction=system_instruction,
     )

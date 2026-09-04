@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Deployment script for Cloud Run Traffic Generator & Cloud Scheduler (Every 6 Hours)
+# Deployment script for Cloud Run Traffic Generator & Cloud Scheduler (Every 45 Minutes)
 
 ENV_FILE="../.env"
 if [ -f "$ENV_FILE" ]; then
@@ -94,16 +94,17 @@ gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
     --role="roles/run.invoker" \
     --quiet >/dev/null
 
-# 6. Create or update Cloud Scheduler Job running every 6 hours
+# 6. Create or update Cloud Scheduler Job running every 45 minutes
 TRIGGER_URL="${SERVICE_URL}/run-eval-traffic"
-echo "Configuring Cloud Scheduler job to run every 6 hours ($TRIGGER_URL)..."
+SCHEDULE_CRON="${TRAFFIC_SCHEDULE_CRON:-*/45 * * * *}"
+echo "Configuring Cloud Scheduler job to run every 45 minutes: $SCHEDULE_CRON ($TRIGGER_URL)..."
 
 if gcloud scheduler jobs describe "$JOB_NAME" --project="$PROJECT_ID" --location="$LOCATION" >/dev/null 2>&1; then
     echo "Updating existing Cloud Scheduler job..."
     gcloud scheduler jobs update http "$JOB_NAME" \
         --project="$PROJECT_ID" \
         --location="$LOCATION" \
-        --schedule="0 */6 * * *" \
+        --schedule="$SCHEDULE_CRON" \
         --uri="$TRIGGER_URL" \
         --http-method="POST" \
         --oidc-service-account-email="$SA_EMAIL" \
@@ -114,7 +115,7 @@ else
     gcloud scheduler jobs create http "$JOB_NAME" \
         --project="$PROJECT_ID" \
         --location="$LOCATION" \
-        --schedule="0 */6 * * *" \
+        --schedule="$SCHEDULE_CRON" \
         --uri="$TRIGGER_URL" \
         --http-method="POST" \
         --oidc-service-account-email="$SA_EMAIL" \
@@ -124,6 +125,6 @@ fi
 
 echo "=== Deployment Complete ==="
 echo "Cloud Run Service: $SERVICE_URL"
-echo "Scheduled Cron: Every 6 hours (0 */6 * * *)"
+echo "Scheduled Cron: Every 45 minutes ($SCHEDULE_CRON)"
 echo "To test manually:"
 echo "curl -X POST -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" ${TRIGGER_URL}"

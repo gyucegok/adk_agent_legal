@@ -18,7 +18,7 @@ Demonstrate an end-to-end production-ready agent architecture that eliminates in
 2. **Unified Agent Lifecycle**: Manages local prototyping (`playground`), evaluation, and deployment via `agents-cli`.
 3. **Agent Runtime & Telemetry**: Deployed to Google Cloud Agent Runtime with native OpenTelemetry span and log exports visible in the Cloud Console.
 4. **Gemini Enterprise Integration**: Registered with Gemini Enterprise application `ge-gyucegok` for web chat and assistant orchestration.
-5. **Scheduled Traffic Generator**: Runs as a Cloud Run microservice invoked every 6 hours via Cloud Scheduler to simulate evaluation traffic and maintain live telemetry.
+5. **Scheduled Traffic Generator**: Runs as a Cloud Run microservice invoked every 45 minutes via Cloud Scheduler to simulate evaluation traffic and maintain live telemetry.
 
 ---
 
@@ -29,8 +29,8 @@ Demonstrate an end-to-end production-ready agent architecture that eliminates in
 | **`agent_with_rag/`** | Core ADK agent definition (`App` and `root_agent`) with RAG retrieval tool integration. <br> 🛠️ *Tech: Google ADK, Vertex AI RAG* |
 | **`scripts/`** | Python management utilities for RAG 2.0 corpus creation, ingestion, and teardown. <br> 🛠️ *Tech: Vertex AI Python SDK* |
 | **`eval/`** | Official Gen AI Evaluation service suite (`EvalTask`, custom pointwise rubrics, and Vertex AI Experiments logging). <br> 🛠️ *Tech: vertexai.evaluation* |
-| **`tests/`** | Unit, integration, and `agents-cli` evaluation scenarios (`tests/eval/evalsets/legal_contracts.evalset.json`). <br> 🛠️ *Tech: pytest, agents-cli eval* |
-| **`traffic_generator/`** | Containerized FastAPI microservice on Cloud Run scheduled via Cloud Scheduler cron `0 */6 * * *`. <br> 🛠️ *Tech: FastAPI, Uvicorn, Cloud Run, Cloud Scheduler* |
+| **`tests/`** | Unit, integration, and `agents-cli` evaluation scenarios (`tests/eval/datasets/basic-dataset.json`). <br> 🛠️ *Tech: pytest, agents-cli eval* |
+| **`traffic_generator/`** | Containerized FastAPI microservice on Cloud Run scheduled via Cloud Scheduler cron `*/45 * * * *`. <br> 🛠️ *Tech: FastAPI, Uvicorn, Cloud Run, Cloud Scheduler* |
 | **`deployment/`** | Infrastructure as Code configuration for single-project and CI/CD targets. <br> 🛠️ *Tech: Terraform* |
 
 ---
@@ -72,6 +72,10 @@ GOOGLE_CLOUD_PROJECT="gyucegok-alto"
 GOOGLE_CLOUD_LOCATION="us-central1"
 GOOGLE_GENAI_USE_VERTEXAI="1"
 
+# Model Selection (Parameterizable)
+AGENT_MODEL="gemini-3.7-flash"
+EVAL_JUDGE_MODEL="gemini-3.7-flash"
+
 # OpenTelemetry Instrumentation for Agent Runtime
 GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true
 OTEL_SEMCONV_STABILITY_OPT_IN="gen_ai_latest_experimental"
@@ -80,6 +84,11 @@ OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
 # Storage and Corpus Variables
 LEGAL_CORPUS="sec-legal-contracts-v2"
 LEGAL_SOURCE_GCS_URI="gs://legal-agent-contracts-gyucegok-alto"
+RAG_CORPUS_NAME="projects/144908374040/locations/us-central1/ragCorpora/6217527148840747008"
+
+# Scheduled Traffic Generator
+REASONING_ENGINE_ID="1268560990790746112"
+TRAFFIC_SCHEDULE_CRON="*/45 * * * *"
 ```
 
 > [!IMPORTANT]
@@ -171,7 +180,7 @@ Run the bundled multi-turn evaluation suite:
 agents-cli eval run
 ```
 
-Uses `tests/eval/eval_config.json` to score `tool_trajectory_avg_score`, `response_match_score`, and `hallucinations_v1`.
+Uses `tests/eval/eval_config.yaml` to score response quality and custom evaluation rubrics.
 
 ---
 
@@ -224,11 +233,26 @@ cd traffic_generator
 2. **Dedicated Service Account**: Provisions `legal-traffic-scheduler-sa` with `roles/aiplatform.user` and `roles/logging.logWriter`.
 3. **Cloud Run Deployment**: Deploys the microservice with port `8080` in `us-central1` (`https://legal-agent-traffic-gen-ox6qvewbia-uc.a.run.app`).
 4. **IAM Invocations**: Grants the service account `roles/run.invoker` on the Cloud Run service.
-5. **Cloud Scheduler Job**: Configures job `legal-agent-eval-traffic-cron` running on schedule `0 */6 * * *` (every 6 hours) targeting `/run-eval-traffic` with OIDC authentication.
+5. **Cloud Scheduler Job**: Configures job `legal-agent-eval-traffic-cron` running on schedule `*/45 * * * *` (every 45 minutes) targeting `/run-eval-traffic` with OIDC authentication.
 
-### Manual Traffic Trigger
-Trigger a traffic run manually using cURL:
+### Traffic Scenarios & Telemetry "Color"
+The microservice executes 10 structured scenarios across 6 diagnostic categories to illuminate Cloud Trace spans and evaluation metrics:
+* **`SUCCESS_VALID_SYNTHESIS` (5 queries)**: Multi-document contract synthesis, amendment overrides, entity additions, and definition tracing.
+* **`FAIL_OUT_OF_CORPUS`**: Targets non-indexed entities (Tesla/SolarCity) inducing 0 RAG chunks retrieved to verify missing-context handling.
+* **`FAIL_HALLUCINATION_TRAP`**: Contradictory false-premise queries to test ungrounded generation detection.
+* **`FAIL_SAFETY_ADVERSARIAL`**: Prompt injection / jailbreak attempts to test safety policy guardrails.
+* **`FAIL_MALFORMED_INPUT`**: Blank/whitespace queries to test input validation and token handling.
+* **`FAIL_FAULT_INJECTION`**: Malformed payload to produce an intentional HTTP 4xx trace for alerting monitors.
 
+### Manual Traffic Trigger & Inspection
+Inspect registered scenarios:
+```bash
+curl -X GET \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  https://legal-agent-traffic-gen-ox6qvewbia-uc.a.run.app/scenarios
+```
+
+Trigger a traffic run manually:
 ```bash
 curl -X POST \
   -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
