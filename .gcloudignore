@@ -1,0 +1,11 @@
+#!include:.gitignore
+
+.gcloudignore
+.git
+.gitignore
+.venv/
+data/
+images/
+traffic_generator/
+eval/evaluation_results.json
+*.log

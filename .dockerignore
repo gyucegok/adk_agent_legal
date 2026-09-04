@@ -1,0 +1,9 @@
+.git
+.gitignore
+.gcloudignore
+.venv/
+data/
+images/
+traffic_generator/
+eval/evaluation_results.json
+*.log

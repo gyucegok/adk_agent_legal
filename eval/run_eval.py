@@ -1,78 +1,63 @@
+"""Evaluation runner using Gemini Enterprise Agent Platform Gen AI Evaluation Service.
+
+This script executes the legal contract evaluation scenarios against the agent,
+scores the outputs using Vertex AI Gen AI Evaluation Service (EvalTask with
+PointwiseMetric rubrics), and logs metrics to Vertex AI Experiments.
+"""
+
+from __future__ import annotations
+
+import json
 import os
 import re
-import json
 import sys
-import asyncio
-from dotenv import load_dotenv, find_dotenv
+from typing import Any, List, Tuple
 
-# Load env vars
-load_dotenv(find_dotenv())
-
-# Ensure we can import the agent from the parent directory
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-try:
-    from agent_with_rag.agent import corpus_name
-except ImportError as e:
-    print(f"Error importing agent properties: {e}")
-    sys.exit(1)
-
+from dotenv import find_dotenv, load_dotenv
+import pandas as pd
 import vertexai
+from vertexai.evaluation import EvalTask, PointwiseMetric
 from vertexai.preview.generative_models import GenerativeModel, Tool
 import vertexai.preview.rag as rag
-from google import genai
 
-# Initialize vertex ai
-vertexai.init(project=os.environ.get("PROJECT_ID"), location=os.environ.get("LOCATION"))
+# Load environment variables
+load_dotenv(find_dotenv())
 
-# Recreate the tool and model natively to bypass ADK execution bug
-rag_retrieval_tool = Tool.from_retrieval(
-    retrieval=rag.Retrieval(
-        source=rag.VertexRagStore(
-            rag_resources=[rag.RagResource(rag_corpus=corpus_name)],
-            similarity_top_k=45,
-            vector_distance_threshold=0.5,
-        ),
-    )
-)
+PROJECT_ID = os.getenv("PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
+LOCATION = os.getenv("LOCATION", "us-central1")
+RAG_CORPUS_NAME = os.getenv("RAG_CORPUS_NAME")
 
-agent_model = GenerativeModel(
-    "gemini-2.5-pro",
-    tools=[rag_retrieval_tool],
-    system_instruction='''You are a legal analyst using a RAG corpus. Synthesize the best possible answer using the provided context. If parts of the answer are missing from the context, explicitly state what is missing, but still provide the information you *do* have rather than refusing to answer entirely. Do NOT hallucinate.
+if not PROJECT_ID:
+    print("Error: PROJECT_ID or GOOGLE_CLOUD_PROJECT environment variable is required.", file=sys.stderr)
+    sys.exit(1)
 
-Here are examples of how you should structure your answers:
+# Initialize Vertex AI
+print(f"Initializing Vertex AI evaluation for project={PROJECT_ID}, location={LOCATION}...")
+vertexai.init(project=PROJECT_ID, location=LOCATION)
 
-Example 1 (Entity Additions):
-Question: Across the contract family for Acme Corp, list all counterparties or subsidiaries that were explicitly added over time.
-Answer: Based on the provided documents, the following entities were explicitly added:
-- Acme Tech LLC was added as a guarantor in the First Amendment.
-- Acme Global Inc. was added in the Second Amendment.
-Information missing: The documents do not list any entities that were removed.
 
-Example 2 (Clause Overrides):
-Question: Identify the specific amendment within the Beta Corp documents that modified the 'Termination' clause. How does the termination date differ?
-Answer: The 'Termination' clause was modified by Amendment No. 3. The amended termination date is December 31, 2026.
-Information missing: The original agreement containing the original termination date is not present in the provided context, so the exact difference cannot be calculated.
+def extract_sections(
+    filepath: str, pattern: str, extract_group: bool = True
+) -> List[str]:
+    """Extracts sections matching pattern from markdown documentation.
 
-Example 3 (Cross-Family Comparison):
-Question: Compare the 'Governing Law' clauses across Gamma Inc and Delta LLC. Did any change their preferred jurisdiction?
-Answer: 
-- Gamma Inc: The baseline governing law is New York. Amendment 2 shifted the jurisdiction to binding arbitration in Delaware.
-- Delta LLC: The governing law is California. No amendments were found that shifted this jurisdiction.'''
-)
+    Args:
+        filepath: Path to the markdown file.
+        pattern: Regex pattern to match.
+        extract_group: Whether to extract capture group 1.
 
-eval_client = genai.Client(vertexai=True, project=os.environ.get("PROJECT_ID"), location=os.environ.get("LOCATION"))
-
-def extract_sections(filepath, pattern, extract_group=True):
+    Returns:
+        List of extracted strings.
+    """
     if not os.path.exists(filepath):
-        print(f"File not found: {filepath}")
+        print(f"Warning: File not found: {filepath}", file=sys.stderr)
         return []
-    with open(filepath, 'r') as f:
+
+    with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
-    
-    sections = content.split('### ')[1:]
-    extracted = []
+
+    sections = content.split("### ")[1:]
+    extracted: List[str] = []
     for sec in sections:
         if extract_group:
             match = re.search(pattern, sec, re.DOTALL)
@@ -84,91 +69,180 @@ def extract_sections(filepath, pattern, extract_group=True):
             extracted.append(sec.strip())
     return extracted
 
-def load_data():
-    questions_file = os.path.join(os.path.dirname(__file__), 'RAG_EVALUATION_QUESTIONS.md')
-    answers_file = os.path.join(os.path.dirname(__file__), 'RAG_EVALUATION_ANSWERS.md')
-    
+
+def load_eval_data() -> Tuple[List[str], List[str]]:
+    """Loads evaluation questions and rubrics from repository files.
+
+    Returns:
+        Tuple of (questions, rubrics).
+    """
+    current_dir = os.path.dirname(__file__)
+    questions_file = os.path.join(current_dir, "RAG_EVALUATION_QUESTIONS.md")
+    answers_file = os.path.join(current_dir, "RAG_EVALUATION_ANSWERS.md")
+
     q_pattern = r'\*\*Question:\*\*\s*"(.*?)"'
     questions = extract_sections(questions_file, q_pattern, extract_group=True)
-    rubrics = extract_sections(answers_file, r'', extract_group=False)
-    
+    rubrics = extract_sections(answers_file, r"", extract_group=False)
+
     return questions, rubrics
 
-def evaluate_answer(question, answer, rubric):
-    prompt = f"""
-You are an expert evaluator grading a RAG-based legal AI agent.
-Please evaluate the agent's answer to the following question based on the provided grading rubric.
 
-Question: {question}
+def build_agent_model() -> GenerativeModel:
+    """Builds the GenerativeModel wired with the RAG 2.0 retrieval tool.
 
-Agent's Answer:
-{answer}
+    Returns:
+        Configured GenerativeModel ready for inference.
+    """
+    rag_tools = []
+    if RAG_CORPUS_NAME:
+        rag_tools.append(
+            Tool.from_retrieval(
+                retrieval=rag.Retrieval(
+                    source=rag.VertexRagStore(
+                        rag_resources=[rag.RagResource(rag_corpus=RAG_CORPUS_NAME)],
+                        similarity_top_k=45,
+                        vector_distance_threshold=0.5,
+                    )
+                )
+            )
+        )
+    else:
+        print(
+            "WARNING: RAG_CORPUS_NAME not set. Agent will run without RAG retrieval tool.",
+            file=sys.stderr,
+        )
 
-Grading Rubric:
-{rubric}
-
-Provide your evaluation in the following format:
-SCORE: [Full Points / Partial Points / Failure]
-REASONING: [Brief explanation of why this score was given based on the rubric]
-"""
-    response = eval_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
+    system_instruction = (
+        "You are an expert legal analyst using a RAG corpus. Synthesize the best possible "
+        "answer using the provided context. If parts of the answer are missing from the "
+        "context, explicitly state what is missing, but still provide the information you "
+        "do have rather than refusing to answer entirely. Do NOT hallucinate."
     )
-    return response.text
 
-async def main():
-    print("Loading evaluation data...")
-    questions, rubrics = load_data()
-    
+    return GenerativeModel(
+        model_name="gemini-2.5-pro",
+        tools=rag_tools,
+        system_instruction=system_instruction,
+    )
+
+
+def create_legal_rubric_metric() -> PointwiseMetric:
+    """Creates a custom PointwiseMetric using Gemini Enterprise Gen AI Evaluation Service.
+
+    Returns:
+        Configured PointwiseMetric for legal contract synthesis grading.
+    """
+    metric_prompt_template = """
+You are an expert legal evaluator grading responses generated by a RAG-based legal AI agent.
+Grade the model's response strictly according to the reference criteria and ground truth rubric.
+
+Question:
+{prompt}
+
+Model Response:
+{response}
+
+Grading Rubric & Reference Criteria:
+{reference}
+
+Evaluate the response according to:
+1. Retrieval Accuracy: Did the model locate the required clauses and documents?
+2. Synthesis Quality: Did it accurately explain amendments, overrides, or entity additions?
+3. Faithfulness: Did it avoid hallucinating dates, terms, or entities not in context?
+4. Transparency: Did it explicitly call out any missing baseline context?
+
+Output a rating between 1 and 5:
+- 5: Full Points (Fully meets all criteria and delta nuances)
+- 3: Partial Points (Partially correct, minor omission, or vague on delta)
+- 1: Failure (Factually incorrect, hallucinated, or failed retrieval)
+
+Explanation: Provide concise legal reasoning for the score.
+"""
+    return PointwiseMetric(
+        metric="legal_contract_adherence",
+        metric_prompt_template=metric_prompt_template,
+    )
+
+
+def main() -> None:
+    """Runs the evaluation pipeline via Gen AI Evaluation Service."""
+    print("=" * 60)
+    print("Gemini Enterprise Agent Platform - Legal Agent Evaluation")
+    print("=" * 60)
+
+    questions, rubrics = load_eval_data()
     if not questions or not rubrics:
-        print("Failed to load questions or rubrics. Check file paths.")
-        return
-        
-    print(f"Loaded {len(questions)} questions and {len(rubrics)} rubrics.")
-    
-    if len(questions) != len(rubrics):
-        print("Warning: Number of questions does not match number of rubrics!")
-        
-    results = []
-    
-    for i, (q, r) in enumerate(zip(questions, rubrics)):
-        print(f"\n{'='*50}")
-        print(f"Evaluating Question {i+1}/{len(questions)}")
-        print(f"Q: {q}")
-        print(f"{'='*50}")
-        
-        print("\nQuerying agent (this may take a moment)...")
-        answer_text = ""
+        print("Error: Failed to load evaluation questions or rubrics.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Loaded {len(questions)} evaluation scenarios.")
+    agent_model = build_agent_model()
+
+    responses: List[str] = []
+    print("\nExecuting agent inferences across evaluation dataset...")
+    for idx, question in enumerate(questions, start=1):
+        print(f"\n[{idx}/{len(questions)}] Querying: {question[:80]}...")
         try:
-            # Use native GenerativeModel generate_content to invoke RAG
-            response = agent_model.generate_content(q)
-            answer_text = response.text
-        except Exception as e:
-            answer_text = f"Error querying agent: {e}"
-            
-        print(f"\nAgent Answer:\n{answer_text}\n")
-        
-        print("Grading answer with LLM judge...")
-        try:
-            evaluation = evaluate_answer(q, answer_text, r)
-        except Exception as e:
-            evaluation = f"Error grading answer: {e}"
-            
-        print(f"\nEvaluation Result:\n{evaluation}\n")
-        
-        results.append({
-            "question_number": i + 1,
-            "question": q,
-            "agent_answer": answer_text,
-            "rubric": r,
-            "evaluation": evaluation
-        })
-        
-    output_file = os.path.join(os.path.dirname(__file__), 'evaluation_results.json')
-    with open(output_file, 'w') as f:
-        json.dump(results, f, indent=2)
-    print(f"\nEvaluation complete. Detailed results saved to {output_file}")
+            resp = agent_model.generate_content(question)
+            text_resp = resp.text or ""
+            responses.append(text_resp)
+            print(f"  -> Generated {len(text_resp)} characters.")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            error_msg = f"Inference error: {exc}"
+            print(f"  -> {error_msg}", file=sys.stderr)
+            responses.append(error_msg)
+
+    # Build evaluation DataFrame for Gen AI Evaluation Service
+    eval_df = pd.DataFrame(
+        {
+            "prompt": questions,
+            "response": responses,
+            "reference": rubrics,
+        }
+    )
+
+    print("\nRunning Gen AI Evaluation Service with PointwiseMetric...")
+    legal_metric = create_legal_rubric_metric()
+
+    eval_task = EvalTask(
+        dataset=eval_df,
+        metrics=[legal_metric],
+        experiment="legal-agent-rag-eval",
+    )
+
+    try:
+        eval_result = eval_task.evaluate()
+        print("\n" + "=" * 60)
+        print("Evaluation Results Summary:")
+        print("=" * 60)
+        if hasattr(eval_result, "summary_metrics"):
+            for k, v in eval_result.summary_metrics.items():
+                print(f"  {k}: {v}")
+
+        # Save detailed results
+        output_file = os.path.join(os.path.dirname(__file__), "evaluation_results.json")
+        metrics_table_dict: List[dict[str, Any]] = []
+        if hasattr(eval_result, "metrics_table"):
+            metrics_table_dict = eval_result.metrics_table.to_dict(orient="records")
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(metrics_table_dict, f, indent=2)
+
+        print(f"\nDetailed evaluation results saved to: {output_file}")
+        print("Traces and experiment runs are visible in Google Cloud Console:")
+        print(f"https://console.cloud.google.com/vertex-ai/experiments?project={PROJECT_ID}")
+
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(f"Error during Gen AI Evaluation execution: {exc}", file=sys.stderr)
+        print("Falling back to saving raw inference responses...")
+        fallback_file = os.path.join(os.path.dirname(__file__), "evaluation_results.json")
+        fallback_records = [
+            {"question": q, "response": r, "rubric": ref}
+            for q, r, ref in zip(questions, responses, rubrics)
+        ]
+        with open(fallback_file, "w", encoding="utf-8") as f:
+            json.dump(fallback_records, f, indent=2)
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -1,158 +1,258 @@
-# Enterprise Legal Analyst Agent (Powered by Vertex AI RAG)
+# Enterprise Legal Analyst Agent
 
-This repository contains an Enterprise-grade AI Agent built using the [Google Cloud ADK](https://google-cloud-adk.readthedocs.io/). It leverages **[Vertex AI RAG Engine](https://cloud.google.com/vertex-ai/docs/rag-overview)** to natively retrieve, synthesize, and analyze complex legal documentation (e.g., Master Agreements, Amendments, and Financial Schedules).
+An Enterprise-grade Legal AI Agent built with Google's **Agent Development Kit (ADK)** and managed end-to-end with **`agents-cli`**. The system leverages **Vertex AI RAG Engine 2.0 Serverless Mode** to synthesize, compare, and analyze complex legal contracts, financial schedules, and corporate amendments.
 
-## Architecture & Goals
+## 🎯 Goal
+
+Demonstrate an end-to-end production-ready agent architecture that eliminates infrastructure overhead by adopting **Serverless RAG 2.0 (`us-central1`)**, standardizes agent operations with **`agents-cli`**, publishes to **Gemini Enterprise**, captures production **OpenTelemetry** traces in **Agent Runtime**, and maintains continuous telemetry via a scheduled **Cloud Run** traffic generator.
+
+🛠️ *Tech: Google ADK, agents-cli, Vertex AI RAG 2.0, Gemini Enterprise, Cloud Run, Cloud Scheduler, OpenTelemetry, FastAPI, Pydantic*
+
+---
+
+## 🏛️ Architecture
 
 ![Legal Agent Architecture](images/legal_agent_architecture.png)
 
-This agent demonstrates **Native RAG Integration** for high-stakes legal analysis. 
-1.  **Managed Indexing**: Creates and maintains a managed RAG Corpus in Vertex AI containing highly complex SEC legal contracts.
-2.  **Native Tool Binding**: Embeds the `VertexAiRagRetrieval` tool directly into the agent's reasoning loop.
-3.  **Cross-Document Synthesis**: Empowers the agent to perform multi-hop reasoning, track clause overrides across amendments, and perform cross-family contract comparisons.
+1. **Serverless RAG 2.0 (`us-central1`)**: Uses `rag.RagManagedVertexVectorSearch()` to provide zero-cluster vector retrieval over SEC contract filings.
+2. **Unified Agent Lifecycle**: Manages local prototyping (`playground`), evaluation, and deployment via `agents-cli`.
+3. **Agent Runtime & Telemetry**: Deployed to Google Cloud Agent Runtime with native OpenTelemetry span and log exports visible in the Cloud Console.
+4. **Gemini Enterprise Integration**: Registered with Gemini Enterprise application `ge-gyucegok` for web chat and assistant orchestration.
+5. **Scheduled Traffic Generator**: Runs as a Cloud Run microservice invoked every 6 hours via Cloud Scheduler to simulate evaluation traffic and maintain live telemetry.
 
-## Prerequisites
+---
 
-1.  **Google Cloud Project**: With Vertex AI APIs enabled.
-2.  **Global Configuration**: Ensure the `.env` file in the repository root is configured with `PROJECT_ID`, `LOCATION`, `LEGAL_CORPUS`, and `RAG_CORPUS_NAME`.
-3.  **Dependencies**: Install the required Python packages from the root `requirements.txt`.
+## 📂 Key Components & Relevant Documentation
 
-## 1. Setup Data & Corpus
+| Component / Folder | Description |
+| :--- | :--- |
+| **`agent_with_rag/`** | Core ADK agent definition (`App` and `root_agent`) with RAG retrieval tool integration. <br> 🛠️ *Tech: Google ADK, Vertex AI RAG* |
+| **`scripts/`** | Python management utilities for RAG 2.0 corpus creation, ingestion, and teardown. <br> 🛠️ *Tech: Vertex AI Python SDK* |
+| **`eval/`** | Official Gen AI Evaluation service suite (`EvalTask`, custom pointwise rubrics, and Vertex AI Experiments logging). <br> 🛠️ *Tech: vertexai.evaluation* |
+| **`tests/`** | Unit, integration, and `agents-cli` evaluation scenarios (`tests/eval/evalsets/legal_contracts.evalset.json`). <br> 🛠️ *Tech: pytest, agents-cli eval* |
+| **`traffic_generator/`** | Containerized FastAPI microservice on Cloud Run scheduled via Cloud Scheduler cron `0 */6 * * *`. <br> 🛠️ *Tech: FastAPI, Uvicorn, Cloud Run, Cloud Scheduler* |
+| **`deployment/`** | Infrastructure as Code configuration for single-project and CI/CD targets. <br> 🛠️ *Tech: Terraform* |
 
-Before running the agent, you must create the RAG corpus and index the documents.
+---
 
-```bash
-./setup_rag_v2.sh
-```
+## ⚙️ Prerequisites
 
-This script reads configuration from the `.env` file, provisions a high-performance Vertex AI RAG corpus, and imports the legal contracts from Google Cloud Storage.
+1. **Python**: Version `3.11` or `3.12` installed.
+2. **Google Cloud Project**: Active project with billing enabled (`PROJECT_ID="gyucegok-alto"`).
+3. **Google Cloud CLI (`gcloud`)**: Installed, authorized, and pointed to your project.
+4. **Agent CLI (`agents-cli`)**: Installed via `uv tool install google-agents-cli` or `pip install google-agents-cli`.
+5. **Enable Required Google Cloud APIs**:
+   ```bash
+   gcloud services enable \
+       aiplatform.googleapis.com \
+       vectorsearch.googleapis.com \
+       run.googleapis.com \
+       cloudscheduler.googleapis.com \
+       agentregistry.googleapis.com
+   ```
 
-## 2. Local Execution
+---
 
-To run the agent locally in an interactive CLI environment, use the ADK `run` command:
+## 🚀 Setup & Installation
 
-```bash
-adk run agent_with_rag
-```
+### 1. Environment Configuration
 
-You can ask complex questions such as:
-> *"Compare the 'Governing Law' and 'Dispute Resolution' clauses across the Bank of America and Goldman Sachs documents. Did any of these financial institutions change their preferred jurisdiction or arbitration rules via an amendment?"*
-
-## 3. Cloud Deployment (Vertex AI Agent Engine)
-
-This agent is fully compatible with **Vertex AI Agent Engine** (Reasoning Engine) for serverless cloud deployment.
-
-Deploy the agent to your Google Cloud project using the following command:
-
-```bash
-source .env
-adk deploy agent_engine agent_with_rag \
-  --project $GOOGLE_CLOUD_PROJECT \
-  --region $GOOGLE_CLOUD_LOCATION \
-  --env_file .env
-```
-
-### Querying the Deployed Agent (REST API)
-
-By design, ADK optimizes for streaming responses. The agent registers a high-performance streaming method (`streaming_agent_run_with_events`) rather than a basic synchronous query.
-
-**Important (IAM Permissions):** When Agent Engine runs in the cloud, it uses its own dedicated [Reasoning Engine Service Agent](https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/set-up#default-service-agent) (e.g., `service-123456789@gcp-sa-aiplatform-re.iam.gserviceaccount.com`, where the number is your Project Number). You **must** grant this specific service account the **[Vertex AI User](https://cloud.google.com/iam/docs/roles-permissions/aiplatform#aiplatform.user)** (`roles/aiplatform.user`) role in your project so the deployed agent has the necessary permissions to query the Vertex AI RAG corpus.
-
-Once deployed and permissions are granted, you can query your agent using the following cURL command (replace `8492240784848846848` with your actual Reasoning Engine ID):
+Copy the template file to `.env`:
 
 ```bash
-# We pipe the output to `jq` to parse the streaming JSON and extract only the agent's text answer.
-curl -s -X POST "https://us-east1-aiplatform.googleapis.com/v1beta1/projects/${GOOGLE_CLOUD_PROJECT}/locations/${GOOGLE_CLOUD_LOCATION}/reasoningEngines/8492240784848846848:streamQuery" \
--H "Authorization: Bearer $(gcloud auth print-access-token)" \
--H "Content-Type: application/json" \
--d '{
-  "classMethod": "streaming_agent_run_with_events",
-  "input": {
-    "request_json": "{\"user_id\": \"demo-user\", \"message\": {\"role\": \"user\", \"parts\": [{\"text\": \"Based on the original agreement and the subsequent amendments for The Walt Disney Company, what are the net-new compliance or reporting obligations imposed on the parties that were entirely absent from the original text?\"}]}}"
-  }
-}' | jq -r '.events[]?.content.parts[]?.text // empty'
+cp .env.template .env
 ```
 
-*Note: You can also interact with your agent through the **Agent Space UI** in the Google Cloud Console, or integrate it into your downstream applications using the Vertex AI SDK.*
-
-## 4. Evaluation & Validation
-
-This repository includes an automated, LLM-as-a-judge evaluation pipeline designed to test the agent against rigorous, multi-hop legal analysis scenarios.
-
-**Running the Evaluation:**
+Set the required environment variables in `.env`:
 
 ```bash
-python3 eval/run_eval.py
+PROJECT_ID="gyucegok-alto"
+LOCATION="us-central1"
+GOOGLE_CLOUD_PROJECT="gyucegok-alto"
+GOOGLE_CLOUD_LOCATION="us-central1"
+GOOGLE_GENAI_USE_VERTEXAI="1"
+
+# OpenTelemetry Instrumentation for Agent Runtime
+GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true
+OTEL_SEMCONV_STABILITY_OPT_IN="gen_ai_latest_experimental"
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+
+# Storage and Corpus Variables
+LEGAL_CORPUS="sec-legal-contracts-v2"
+LEGAL_SOURCE_GCS_URI="gs://legal-agent-contracts-gyucegok-alto"
 ```
 
-This script will orchestrate queries against the live agent, evaluate the answers against a strict grading rubric, and output detailed reasoning and scores to `eval/evaluation_results.json`.
+> [!IMPORTANT]
+> Vertex AI RAG Engine 2.0 Serverless Mode backed by Vector Search 2.0 is available **exclusively in `us-central1`**. All deployments, corpora, and services in this repository must use `us-central1`.
 
-## 5. Registering the Agent with Gemini Enterprise
+### 2. Install Project Dependencies
 
-To make the deployed ADK agent available to users within the Gemini Enterprise web application, you must register it.
+Install dependencies into your virtual environment:
 
-### Step 1: Configure OAuth Authorization
-If your agent needs to access Google Cloud resources on behalf of a user, you must first [Create OAuth 2.0 credentials](https://docs.cloud.google.com/gemini/enterprise/docs/register-and-manage-an-adk-agent#obtain_authorization_details).
+```bash
+pip install -r requirements.txt
+```
 
-1. Go to the [Credentials page](https://console.cloud.google.com/apis/credentials) and create an **OAuth client ID** (Web application).
-2. Add the following Authorized redirect URIs:
-   - `https://vertexaisearch.cloud.google.com/oauth-redirect`
-   - `https://vertexaisearch.cloud.google.com/static/oauth/oauth.html`
-3. Download the JSON file containing your Client ID, Client secret, and URIs.
+---
 
-Because Gemini Enterprise apps often reside in multi-regions (e.g., `global`), while Reasoning Engines reside in specific regions (e.g., `us-east1`), UI registration can sometimes fail with location mismatch errors. To bypass this, we use the REST API.
+## 🛠️ Helper Scripts
 
-**Add the Authorization Resource:**
+### RAG 2.0 Corpus Management
+
+Use `scripts/manage_rag.py` to automate corpus provisioning and document ingestion:
+
+* **Provision Corpus and Ingest Contracts**:
+  ```bash
+  python scripts/manage_rag.py setup
+  ```
+  Creates a serverless corpus using `rag.RagManagedVertexVectorSearch()` and imports all contracts from `LEGAL_SOURCE_GCS_URI`. Prints the resulting `RAG_CORPUS_NAME`.
+
+* **Inspect Corpus Status and File Count**:
+  ```bash
+  python scripts/manage_rag.py status
+  ```
+
+* **Destroy Corpus**:
+  ```bash
+  python scripts/manage_rag.py destroy
+  ```
+
+* **Help and Options**:
+  ```bash
+  python scripts/manage_rag.py --help
+  ```
+
+Backward-compatible shell wrappers are also available:
+* `./setup_rag_v2.sh` delegates to `python scripts/manage_rag.py setup`.
+* `./destroy_rag.sh` delegates to `python scripts/manage_rag.py destroy`.
+
+---
+
+## 💻 Local Development with `agents-cli`
+
+### Interactive Web Playground
+Launch the interactive web UI with hot reloading:
+```bash
+agents-cli playground
+```
+Open `http://localhost:8080` in your browser to test multi-turn conversations and inspect retrieved chunks.
+
+### CLI Query Execution
+Execute a direct query from the terminal:
+```bash
+agents-cli run "Compare the 'Governing Law' clauses between Bank of America and Goldman Sachs."
+```
+
+### Code Quality & Linting
+Validate codebase formatting and typing:
+```bash
+agents-cli lint
+```
+
+---
+
+## 📊 Evaluation & Benchmarking
+
+### Option A: Official Gen AI Evaluation Service
+Execute automated rubric grading using the official Vertex AI Gen AI Evaluation Service:
+
+```bash
+python eval/run_eval.py
+```
+
+* Executes inference across the 5 canonical legal evaluation questions.
+* Evaluates answers using custom `PointwiseMetric` rubrics (Clause Override, Net-New Obligations, Entity Tracking, Definition Tracing, and Cross-Family Comparison).
+* Logs experiment metrics and parameters directly to **Vertex AI Experiments**.
+
+### Option B: Native `agents-cli` Evaluation Harness
+Run the bundled multi-turn evaluation suite:
+
+```bash
+agents-cli eval run
+```
+
+Uses `tests/eval/eval_config.json` to score `tool_trajectory_avg_score`, `response_match_score`, and `hallucinations_v1`.
+
+---
+
+## ☁️ Deployment & Gemini Enterprise Integration
+
+### 1. Deploy to Agent Runtime
+Deploy the packaged agent to Google Cloud Agent Runtime:
+
+```bash
+agents-cli deploy
+```
+
+The deployed reasoning engine exposes a streaming endpoint:
+* **Resource Pattern**: `projects/PROJECT_ID/locations/us-central1/reasoningEngines/ENGINE_ID`
+* **Deployed Instance**: `projects/144908374040/locations/us-central1/reasoningEngines/1268560990790746112`
+
+### 2. Inspect Telemetry & Traces
+Telemetry is natively enabled via environment variables:
+1. Open the [Google Cloud Console](https://console.cloud.google.com/).
+2. Navigate to **Agent Platform > Agents > Deployments**.
+3. Select the deployed agent.
+4. Click **Traces** to view OpenTelemetry spans, latency breakdowns, and tool execution.
+5. Click **Logs** to inspect structured execution logs.
+
+### 3. Publish to Gemini Enterprise
+Register your deployed agent in your Gemini Enterprise app:
+
+```bash
+agents-cli publish gemini-enterprise \
+  --agent-runtime-id 1268560990790746112 \
+  --gemini-enterprise-app-id ge-gyucegok
+```
+
+* **App ID**: `ge-gyucegok` (`ge-gyucegok_1788488839784`)
+* **Agent Resource Name**: `projects/144908374040/locations/global/collections/default_collection/engines/ge-gyucegok_1788488839784/assistants/default_assistant/agents/13029818108706916958`
+
+---
+
+## ⏱️ Cloud Run Scheduled Traffic Generator
+
+To generate recurring traffic and supply continuous telemetry to online evaluation monitors, deploy the containerized traffic generator microservice:
+
+```bash
+cd traffic_generator
+./deploy_traffic_generator.sh
+```
+
+### What `deploy_traffic_generator.sh` Configures:
+1. **API Enablement**: Enables `run.googleapis.com` and `cloudscheduler.googleapis.com`.
+2. **Dedicated Service Account**: Provisions `legal-traffic-scheduler-sa` with `roles/aiplatform.user` and `roles/logging.logWriter`.
+3. **Cloud Run Deployment**: Deploys the microservice with port `8080` in `us-central1` (`https://legal-agent-traffic-gen-ox6qvewbia-uc.a.run.app`).
+4. **IAM Invocations**: Grants the service account `roles/run.invoker` on the Cloud Run service.
+5. **Cloud Scheduler Job**: Configures job `legal-agent-eval-traffic-cron` running on schedule `0 */6 * * *` (every 6 hours) targeting `/run-eval-traffic` with OIDC authentication.
+
+### Manual Traffic Trigger
+Trigger a traffic run manually using cURL:
+
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  -H "X-Goog-User-Project: ${GOOGLE_CLOUD_PROJECT}" \
-  "https://global-discoveryengine.googleapis.com/v1alpha/projects/${GOOGLE_CLOUD_PROJECT}/locations/global/authorizations?authorizationId=my-custom-auth" \
-  -d '{
-    "name": "projects/'${GOOGLE_CLOUD_PROJECT}'/locations/global/authorizations/my-custom-auth",
-    "serverSideOauth2": {
-      "clientId": "YOUR_OAUTH_CLIENT_ID",
-      "clientSecret": "YOUR_OAUTH_CLIENT_SECRET",
-      "authorizationUri": "https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_OAUTH_CLIENT_ID&redirect_uri=https%3A%2F%2Fvertexaisearch.cloud.google.com%2Fstatic%2Foauth%2Foauth.html&scope=https://www.googleapis.com/auth/cloud-platform&include_granted_scopes=true&response_type=code&access_type=offline&prompt=consent",
-      "tokenUri": "https://oauth2.googleapis.com/token"
-    }
-  }'
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  https://legal-agent-traffic-gen-ox6qvewbia-uc.a.run.app/run-eval-traffic
 ```
 
-### Step 2: Register the ADK Agent
-With the authorization in place, register the agent to your Gemini Enterprise App. You must provide the App ID of your Gemini Enterprise instance.
-
+Check microservice health:
 ```bash
-# Register the Agent
-curl -X POST \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  -H "X-Goog-User-Project: ${GOOGLE_CLOUD_PROJECT}" \
-  "https://global-discoveryengine.googleapis.com/v1alpha/projects/${GOOGLE_CLOUD_PROJECT}/locations/global/collections/default_collection/engines/YOUR_APP_ID/assistants/default_assistant/agents" \
-  -d '{
-    "displayName": "Legal RAG Agent",
-    "description": "Enterprise-grade legal analyst powered by Vertex AI RAG.",
-    "adkAgentDefinition": {
-      "provisionedReasoningEngine": {
-        "reasoningEngine": "projects/'${GOOGLE_CLOUD_PROJECT}'/locations/'${GOOGLE_CLOUD_LOCATION}'/reasoningEngines/YOUR_REASONING_ENGINE_ID"
-      }
-    },
-    "authorizationConfig": {
-      "toolAuthorizations": [
-        "projects/YOUR_PROJECT_NUMBER/locations/global/authorizations/my-custom-auth"
-      ]
-    }
-  }'
+curl -X GET \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  https://legal-agent-traffic-gen-ox6qvewbia-uc.a.run.app/health
 ```
 
-### Step 3: Add Permissioned Users
-To allow users to access the registered agent within the Gemini Enterprise application, follow the official instructions to [Add or modify users and their permissions](https://docs.cloud.google.com/gemini/enterprise/docs/data-agent#set-permissions) in the Google Cloud console.
+---
 
-## Cleaning Up
+## 🧹 Teardown & Resource Cleanup
 
-To delete the RAG corpus and save costs:
+To delete the RAG 2.0 corpus and Cloud Run services:
 
 ```bash
-./destroy_rag.sh
+# Delete RAG corpus
+python scripts/manage_rag.py destroy
+
+# Delete Cloud Run service and scheduler job
+gcloud run services delete legal-agent-traffic-gen --region=us-central1 --quiet
+gcloud scheduler jobs delete legal-agent-eval-traffic-cron --location=us-central1 --quiet
 ```

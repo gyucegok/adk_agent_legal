@@ -1,0 +1,12 @@
+name: legal-agent
+agent_directory: agent_with_rag
+region: us-central1
+version: 1.5.0
+language: python
+base_template: adk
+create_params:
+  deployment_target: agent_runtime
+  cicd_runner: skip
+  is_a2a: false
+  agent_directory: agent_with_rag
+acli_version: 1.5.0

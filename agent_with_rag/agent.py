@@ -1,44 +1,55 @@
+"""Enterprise Legal Analyst Agent definition.
+
+This module defines the ADK root agent and App powered by Vertex AI
+RAG 2.0 Serverless mode (RagManagedVertexVectorSearch in us-central1).
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Optional
+
+from dotenv import find_dotenv, load_dotenv
 from google.adk.agents.llm_agent import Agent
+from google.adk.apps.app import App
 from google.adk.tools.retrieval.vertex_ai_rag_retrieval import VertexAiRagRetrieval
 import vertexai
 from vertexai.preview import rag
-import os
-from dotenv import load_dotenv, find_dotenv
 
-# Load .env from the same directory as this script
+# Load environment configuration
 load_dotenv(find_dotenv())
-PROJECT_ID = os.environ.get("PROJECT_ID")
-LOCATION = os.environ.get("LOCATION")
-LEGAL_CORPUS = os.environ.get("LEGAL_CORPUS", "sec-legal-contracts")
 
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+PROJECT_ID: Optional[str] = os.getenv("PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT")
+LOCATION: str = os.getenv("LOCATION", "us-central1")
+LEGAL_CORPUS_DISPLAY_NAME: str = os.getenv("LEGAL_CORPUS", "sec-legal-contracts-v2")
+RAG_CORPUS_NAME: Optional[str] = os.getenv("RAG_CORPUS_NAME")
 
-# In Agent Engine, dynamic API calls at import time can fail or timeout.
-# We expect the corpus name to be injected via environment variables (e.g., .env).
-corpus_name = os.environ.get("RAG_CORPUS_NAME")
-if not corpus_name:
-    raise ValueError("RAG_CORPUS_NAME environment variable is not set.")
+# Initialize Vertex AI in us-central1 for RAG 2.0 Serverless support
+if PROJECT_ID:
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
 
-ask_vertex_retrieval = VertexAiRagRetrieval(
-    name='retrieve_rag_documentation',
-    description=(
-        'Use this tool to retrieve legal contracts and documentation from the RAG corpus. '
-        'You MUST use this tool to answer ANY question regarding the contracts, companies, or the knowledge base.'
-    ),
-    rag_resources=[
-        rag.RagResource(
-            rag_corpus=corpus_name
-        )
-    ],
-    similarity_top_k=45,
-    vector_distance_threshold=0.5,
-)
+# Build RAG Retrieval Tool
+tools = []
+if RAG_CORPUS_NAME:
+    ask_vertex_retrieval = VertexAiRagRetrieval(
+        name="retrieve_rag_documentation",
+        description=(
+            "Use this tool to retrieve legal contracts and documentation from the RAG corpus. "
+            "You MUST use this tool to answer ANY question regarding contracts, amendments, covenants, or counterparties."
+        ),
+        rag_resources=[
+            rag.RagResource(
+                rag_corpus=RAG_CORPUS_NAME
+            )
+        ],
+        similarity_top_k=45,
+        vector_distance_threshold=0.5,
+    )
+    tools.append(ask_vertex_retrieval)
 
-root_agent = Agent(
-    name='root_agent',
-    model='gemini-2.5-pro',
-    tools=[ask_vertex_retrieval],
-    instruction='''You are a legal analyst using a RAG corpus. Synthesize the best possible answer using the provided context. If parts of the answer are missing from the context, explicitly state what is missing, but still provide the information you *do* have rather than refusing to answer entirely. Do NOT hallucinate.
+LEGAL_ANALYST_INSTRUCTION = """You are an expert legal analyst assisting corporate counsel with contract synthesis.
+Synthesize the best possible answer using the provided context from the RAG corpus.
+If parts of the answer are missing from the context, explicitly state what is missing, but still provide the information you *do* have rather than refusing to answer entirely. Do NOT hallucinate.
 
 Here are examples of how you should structure your answers:
 
@@ -58,5 +69,18 @@ Example 3 (Cross-Family Comparison):
 Question: Compare the 'Governing Law' clauses across Gamma Inc and Delta LLC. Did any change their preferred jurisdiction?
 Answer: 
 - Gamma Inc: The baseline governing law is New York. Amendment 2 shifted the jurisdiction to binding arbitration in Delaware.
-- Delta LLC: The governing law is California. No amendments were found that shifted this jurisdiction.'''
+- Delta LLC: The governing law is California. No amendments were found that shifted this jurisdiction."""
+
+# Define root_agent for ADK and agents-cli
+root_agent = Agent(
+    name="legal_analyst_agent",
+    model="gemini-2.5-pro",
+    tools=tools,
+    instruction=LEGAL_ANALYST_INSTRUCTION,
+)
+
+# Standard App pattern for ADK 2.0 and Gemini Enterprise Agent Platform
+app = App(
+    name="legal_agent",
+    root_agent=root_agent,
 )
