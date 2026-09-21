@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-EVAL_JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "gemini-3.7-flash")
+EVAL_JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "gemini-3.8-flash")
 
 _local = threading.local()
 

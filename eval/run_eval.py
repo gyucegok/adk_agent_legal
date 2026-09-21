@@ -30,7 +30,7 @@ AGENT_MODEL = (
     os.getenv("AGENT_MODEL")
     or os.getenv("MODEL_NAME")
     or os.getenv("MODEL")
-    or "gemini-3.7-flash"
+    or "gemini-3.8-flash"
 )
 
 if not PROJECT_ID:

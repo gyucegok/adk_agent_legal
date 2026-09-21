@@ -69,12 +69,12 @@ Set the required environment variables in `.env`:
 PROJECT_ID="gyucegok-alto"
 LOCATION="us-central1"
 GOOGLE_CLOUD_PROJECT="gyucegok-alto"
-GOOGLE_CLOUD_LOCATION="us-central1"
+GOOGLE_CLOUD_LOCATION="global"
 GOOGLE_GENAI_USE_VERTEXAI="1"
 
 # Model Selection (Parameterizable)
-AGENT_MODEL="gemini-3.7-flash"
-EVAL_JUDGE_MODEL="gemini-3.7-flash"
+AGENT_MODEL="gemini-3.8-flash"
+EVAL_JUDGE_MODEL="gemini-3.8-flash"
 
 # OpenTelemetry Instrumentation for Agent Runtime
 GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true
@@ -185,6 +185,8 @@ Uses `tests/eval/eval_config.yaml` to score response quality and custom evaluati
 ---
 
 ## ☁️ Deployment & Gemini Enterprise Integration
+
+> 📖 **Full Engineering Deployment Guide**: Detailed step-by-step procedures, architecture rationale, resource inventories, and verification traces are documented in [docs/GCP_deployment.md](docs/GCP_deployment.md).
 
 ### 1. Deploy to Agent Runtime
 Deploy the packaged agent to Google Cloud Agent Runtime:

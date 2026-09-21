@@ -27,8 +27,13 @@ AGENT_MODEL: str = (
     os.getenv("AGENT_MODEL")
     or os.getenv("MODEL_NAME")
     or os.getenv("MODEL")
-    or "gemini-3.7-flash"
+    or "gemini-3.8-flash"
 )
+
+# Publisher models like gemini-3.8-flash and gemini-3.7-flash are hosted globally.
+# Ensure GOOGLE_CLOUD_LOCATION is set to 'global' so model calls do not fail with 404.
+if not os.getenv("GOOGLE_CLOUD_LOCATION") or os.getenv("GOOGLE_CLOUD_LOCATION") == "us-central1":
+    os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 
 # Initialize Vertex AI in us-central1 for RAG 2.0 Serverless support
 if PROJECT_ID:
